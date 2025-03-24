@@ -1,0 +1,22 @@
+* {
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  overflow: hidden;
+}
+
+.webgl {
+  position: fixed;
+  top: 0;
+  left: 0;
+  outline: none;
+}
+
+.selectBox {
+  border: 1px solid #55aaff;
+  background-color: rgba(75, 160, 255, 0.3);
+  position: fixed;
+}
