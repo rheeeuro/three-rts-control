@@ -1,13 +1,14 @@
 import * as THREE from "three";
-// import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import GUI from "lil-gui";
 import Stats from "three/addons/libs/stats.module.js";
+import GUI from "lil-gui";
 import { SelectionBox } from "three/addons/interactive/SelectionBox.js";
 import { SelectionHelper } from "three/addons/interactive/SelectionHelper.js";
+// import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 /**
  * Base
  */
+
 // Debug
 const gui = new GUI();
 
@@ -42,6 +43,7 @@ window.addEventListener("resize", () => {
 /**
  * Camera
  */
+
 // Base camera
 const camera = new THREE.PerspectiveCamera(
   75,
@@ -62,9 +64,9 @@ scene.add(camera);
 /**
  * Axes Helper
  */
-// const axesHelper = new THREE.AxesHelper(2);
-// axesHelper.position.set(1, 1, 1);
-// scene.add(axesHelper);
+const axesHelper = new THREE.AxesHelper(2);
+axesHelper.position.set(1, 1, 1);
+scene.add(axesHelper);
 
 // Plane
 const planeGeometry = new THREE.PlaneGeometry(100, 100, 100, 100);
@@ -74,7 +76,6 @@ const planeMaterial = new THREE.MeshBasicMaterial({
   wireframe: true,
 });
 const plane = new THREE.Mesh(planeGeometry, planeMaterial);
-// plane.rotateX(Math.PI / 2);
 scene.add(plane);
 
 // Object
@@ -87,7 +88,7 @@ for (let i = 0; i < 20; i++) {
   mesh.position.x = Math.random() * 20 - 10;
   mesh.position.y = Math.random() * 20 - 10;
   mesh.position.z = 1;
-  mesh.name = "1";
+  mesh.name = "unit";
   scene.add(mesh);
 }
 
@@ -111,9 +112,21 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
  */
 const selectionBox = new SelectionBox(camera, scene);
 const helper = new SelectionHelper(renderer, "selectBox");
+
+/**
+ * Stats
+ */
+let stats;
+stats = new Stats();
+document.body.appendChild(stats.dom);
+
+/**
+ * Events
+ */
 document.addEventListener("pointerdown", function (event) {
+  if (event.buttons !== 1) return;
   for (const item of selectionBox.collection) {
-    if (item.name === "1") {
+    if (item.name === "unit") {
       item.material.emissive.set(0x000000);
     }
   }
@@ -126,9 +139,11 @@ document.addEventListener("pointerdown", function (event) {
 });
 
 document.addEventListener("pointermove", function (event) {
+  if (event.buttons !== 1) return;
+  console.log(event);
   if (helper.isDown) {
     for (let i = 0; i < selectionBox.collection.length; i++) {
-      if (selectionBox.collection[i].name === "1") {
+      if (selectionBox.collection[i].name === "unit") {
         selectionBox.collection[i].material.emissive.set(0x000000);
       }
     }
@@ -141,7 +156,7 @@ document.addEventListener("pointermove", function (event) {
 
     const allSelected = selectionBox.select();
     for (let i = 0; i < allSelected.length; i++) {
-      if (allSelected[i].name === "1") {
+      if (allSelected[i].name === "unit") {
         allSelected[i].material.emissive?.set(0xffffff);
       }
     }
@@ -149,6 +164,7 @@ document.addEventListener("pointermove", function (event) {
 });
 
 document.addEventListener("pointerup", function (event) {
+  if (event.button !== 1) return;
   selectionBox.endPoint.set(
     (event.clientX / window.innerWidth) * 2 - 1,
     -(event.clientY / window.innerHeight) * 2 + 1,
@@ -158,15 +174,13 @@ document.addEventListener("pointerup", function (event) {
   const allSelected = selectionBox.select();
 
   for (let i = 0; i < allSelected.length; i++) {
-    if (allSelected[i].name === "1") {
+    if (allSelected[i].name === "unit") {
       allSelected[i].material.emissive.set(0xffffff);
     }
   }
 });
 
-let stats;
-stats = new Stats();
-document.body.appendChild(stats.dom);
+document.addEventListener("contextmenu", (event) => event.preventDefault());
 
 /**
  * Animate
