@@ -124,23 +124,36 @@ document.body.appendChild(stats.dom);
  * Events
  */
 document.addEventListener("pointerdown", function (event) {
+  helper.enabled = event.buttons === 1;
   if (event.buttons !== 1) return;
-  for (const item of selectionBox.collection) {
-    if (item.name === "unit") {
-      item.material.emissive.set(0x000000);
-    }
-  }
-
   selectionBox.startPoint.set(
     (event.clientX / window.innerWidth) * 2 - 1,
     -(event.clientY / window.innerHeight) * 2 + 1,
     0.5
   );
+
+  const mouse = new THREE.Vector2();
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(mouse, camera);
+  const selectableUnits = scene.children.filter((obj) => obj.name === "unit");
+  const intersects = raycaster.intersectObjects(selectableUnits);
+
+  for (const item of selectableUnits) {
+    item.material.emissive?.set(0x000000);
+  }
+
+  // 첫 번째 교차된 유닛만 선택
+  if (intersects.length > 0) {
+    const selected = intersects[0].object;
+    selected.material.emissive?.set(0xffffff);
+  }
 });
 
 document.addEventListener("pointermove", function (event) {
   if (event.buttons !== 1) return;
-  console.log(event);
   if (helper.isDown) {
     for (let i = 0; i < selectionBox.collection.length; i++) {
       if (selectionBox.collection[i].name === "unit") {
