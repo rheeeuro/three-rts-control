@@ -81,7 +81,7 @@ scene.add(plane);
 // Object
 let selectedUnits = [];
 let allUnits = [];
-const unitSpeed = 2; // 2 units per second
+const unitSpeed = 4; // 2 units per second
 const geometry = new THREE.BoxGeometry(1, 1, 1);
 for (let i = 0; i < 20; i++) {
   const material = new THREE.MeshLambertMaterial({
