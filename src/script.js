@@ -161,10 +161,13 @@ function createSelectionMarker(unit) {
 }
 
 function removeSelectionMarker(unit) {
-  if (unit.userData.selectionMarker) {
-    unit.remove(unit.userData.selectionMarker);
-    unit.userData.selectionMarker.geometry.dispose();
-    unit.userData.selectionMarker.material.dispose();
+  const marker = unit.userData.selectionMarker;
+  if (marker) {
+    if (marker.parent) {
+      marker.parent.remove(marker);
+    }
+    marker.geometry.dispose();
+    marker.material.dispose();
     unit.userData.selectionMarker = null;
   }
 }
@@ -289,12 +292,14 @@ document.addEventListener("pointermove", function (event) {
   );
 
   const allSelected = selectionBox.select();
-  selectedUnits = [];
-  for (let i = 0; i < allSelected.length; i++) {
-    if (allSelected[i].name === "unit") {
-      allSelected[i].material.emissive?.set(0xaaaaaa);
-      createSelectionMarker(allSelected[i]); // 마커 추가
-      selectedUnits.push(allSelected[i]);
+  if (allSelected.length > 0) {
+    selectedUnits = [];
+    for (let i = 0; i < allSelected.length; i++) {
+      if (allSelected[i].name === "unit") {
+        allSelected[i].material.emissive?.set(0xaaaaaa);
+        createSelectionMarker(allSelected[i]); // 마커 추가
+        selectedUnits.push(allSelected[i]);
+      }
     }
   }
 });
@@ -312,11 +317,9 @@ document.addEventListener("pointerup", function (event) {
     const intersects = raycaster.intersectObject(plane);
     if (intersects.length > 0) {
       const targetPoint = intersects[0].point;
-      console.log(targetPoint);
 
       const spacing = 1.5; // 유닛 간 거리
       const unitsPerRow = Math.ceil(Math.sqrt(selectedUnits.length));
-      console.log(selectedUnits);
 
       selectedUnits.forEach((unit, i) => {
         const row = Math.floor(i / unitsPerRow);
@@ -328,7 +331,7 @@ document.addEventListener("pointerup", function (event) {
 
         const unitTarget = targetPoint
           .clone()
-          .add(new THREE.Vector3(offsetX, offsetY, 0));
+          .add(new THREE.Vector3(offsetX, offsetY, 1));
         unit.userData.targetPosition = unitTarget;
       });
       showMoveMarker(targetPoint);
@@ -336,6 +339,14 @@ document.addEventListener("pointerup", function (event) {
     return;
   }
   if (event.button !== 1) return;
+
+  for (let i = 0; i < selectionBox.collection.length; i++) {
+    if (selectionBox.collection[i].name === "unit") {
+      selectionBox.collection[i].material.emissive.set(0x000000);
+      removeSelectionMarker(selectionBox.collection[i]); // 마커 제거
+    }
+  }
+
   selectionBox.endPoint.set(
     (event.clientX / window.innerWidth) * 2 - 1,
     -(event.clientY / window.innerHeight) * 2 + 1,
@@ -343,10 +354,12 @@ document.addEventListener("pointerup", function (event) {
   );
 
   const allSelected = selectionBox.select();
-
+  selectedUnits = [];
   for (let i = 0; i < allSelected.length; i++) {
     if (allSelected[i].name === "unit") {
-      allSelected[i].material.emissive.set(0xaaaaaa);
+      allSelected[i].material.emissive?.set(0xaaaaaa);
+      createSelectionMarker(allSelected[i]); // 마커 추가
+      selectedUnits.push(allSelected[i]);
     }
   }
 
@@ -372,6 +385,10 @@ const tick = () => {
   // Update controls
   // controls.update();
   allUnits.forEach((unit) => {
+    // 선택되지 않았는데 마커가 있다면 제거
+    if (!selectedUnits.includes(unit) && unit.userData.selectionMarker) {
+      removeSelectionMarker(unit);
+    }
     const target = unit.userData.targetPosition;
     if (target) {
       const direction = new THREE.Vector3().subVectors(target, unit.position);
@@ -388,10 +405,17 @@ const tick = () => {
           for (let j = 0; j < allUnits.length; j++) {
             const other = allUnits[j];
             if (other !== unit) {
-              const dist = unit.position.distanceTo(other.position);
+              const diff = new THREE.Vector3().subVectors(
+                unit.position,
+                other.position
+              );
+
+              // ✅ Z축 무시
+              diff.z = 0;
+
+              const dist = diff.length();
               if (dist < 3 && dist > 0) {
-                const repulsion = new THREE.Vector3()
-                  .subVectors(unit.position, other.position)
+                const repulsion = diff
                   .normalize()
                   .multiplyScalar(0.5 * deltaTime);
                 unit.position.add(repulsion);
