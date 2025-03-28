@@ -84,17 +84,35 @@ let allUnits = [];
 const unitSpeed = 4; // 2 units per second
 const geometry = new THREE.BoxGeometry(1, 1, 1);
 for (let i = 0; i < 20; i++) {
-  const material = new THREE.MeshLambertMaterial({
-    color: 0xff00ff,
-  });
+  const material = new THREE.MeshLambertMaterial({ color: 0xff00ff });
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.x = Math.random() * 20 - 10;
-  mesh.position.y = Math.random() * 20 - 10;
-  mesh.position.z = 1;
+  let position;
+  let tries = 0;
+
+  // 겹치지 않는 위치 찾기 (최대 100번 시도)
+  do {
+    position = new THREE.Vector3(
+      Math.random() * 20 - 10,
+      Math.random() * 20 - 10,
+      1
+    );
+    tries++;
+  } while (isOverlapping(position, allUnits) && tries < 100);
+
+  mesh.position.copy(position);
   mesh.name = "unit";
-  mesh.userData.targetPosition = null; // 처음엔 목표 위치 없음
+  mesh.userData.targetPosition = null;
   scene.add(mesh);
   allUnits.push(mesh);
+}
+
+function isOverlapping(newPos, existingUnits, minDistance = 1.5) {
+  for (let unit of existingUnits) {
+    if (unit.position.distanceTo(newPos) < minDistance) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -169,7 +187,7 @@ function showMoveMarker(position) {
   scene.add(ring);
 
   const startTime = performance.now();
-  const duration = 500; // 0.5초로 약간 느리게
+  const duration = 200; // 0.5초로 약간 느리게
 
   function easeOutQuad(t) {
     return t * (2 - t); // 부드럽게 감속하는 이징
@@ -180,7 +198,7 @@ function showMoveMarker(position) {
     const t = Math.min(elapsed / duration, 1); // 0~1
     const eased = easeOutQuad(t);
 
-    const scale = 1 + 0.8 * eased;
+    const scale = 1 + 1.8 * eased;
     ring.scale.set(scale, scale, scale);
 
     material.opacity = 1.0 - eased;
@@ -271,6 +289,7 @@ document.addEventListener("pointermove", function (event) {
   );
 
   const allSelected = selectionBox.select();
+  selectedUnits = [];
   for (let i = 0; i < allSelected.length; i++) {
     if (allSelected[i].name === "unit") {
       allSelected[i].material.emissive?.set(0xaaaaaa);
@@ -295,9 +314,21 @@ document.addEventListener("pointerup", function (event) {
       const targetPoint = intersects[0].point;
       console.log(targetPoint);
 
-      // 선택된 유닛들을 해당 지점으로 이동
+      const spacing = 1.5; // 유닛 간 거리
+      const unitsPerRow = Math.ceil(Math.sqrt(selectedUnits.length));
+      console.log(selectedUnits);
+
       selectedUnits.forEach((unit, i) => {
-        const unitTarget = targetPoint.clone();
+        const row = Math.floor(i / unitsPerRow);
+        const col = i % unitsPerRow;
+
+        // 중심 기준으로 좌우/상하로 퍼지게 오프셋 계산
+        const offsetX = (col - (unitsPerRow - 1) / 2) * spacing;
+        const offsetY = ((unitsPerRow - 1) / 2 - row) * spacing;
+
+        const unitTarget = targetPoint
+          .clone()
+          .add(new THREE.Vector3(offsetX, offsetY, 0));
         unit.userData.targetPosition = unitTarget;
       });
       showMoveMarker(targetPoint);
@@ -353,6 +384,20 @@ const tick = () => {
         // ✅ 이동
         if (moveDistance < distance) {
           unit.position.addScaledVector(direction, moveDistance);
+          // ✅ 이동 중 충돌 회피
+          for (let j = 0; j < allUnits.length; j++) {
+            const other = allUnits[j];
+            if (other !== unit) {
+              const dist = unit.position.distanceTo(other.position);
+              if (dist < 3 && dist > 0) {
+                const repulsion = new THREE.Vector3()
+                  .subVectors(unit.position, other.position)
+                  .normalize()
+                  .multiplyScalar(0.5 * deltaTime);
+                unit.position.add(repulsion);
+              }
+            }
+          }
         } else {
           unit.position.copy(target); // 목표 지점 도착
           unit.userData.targetPosition = null;
