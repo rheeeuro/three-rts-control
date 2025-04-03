@@ -1,9 +1,11 @@
 import * as THREE from "three";
 import Stats from "three/addons/libs/stats.module.js";
 import GUI from "lil-gui";
+import * as CANNON from "cannon";
+import { Munkres } from "munkres-js";
 import { SelectionBox } from "three/addons/interactive/SelectionBox.js";
 import { SelectionHelper } from "three/addons/interactive/SelectionHelper.js";
-// import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 /**
  * Base
@@ -44,22 +46,22 @@ window.addEventListener("resize", () => {
  * Camera
  */
 
-// Base camera
+// Camera
 const camera = new THREE.PerspectiveCamera(
   75,
   sizes.width / sizes.height,
   0.1,
   100
 );
-camera.position.x = 0;
-camera.position.y = -3;
-camera.position.z = 10;
+camera.position.set(0, -3, 10);
 camera.lookAt(0, 0, 0);
 scene.add(camera);
 
 // Controls
-// const controls = new OrbitControls(camera, canvas);
-// controls.enableDamping = true;
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.enablePan = false;
+controls.enableRotate = false;
 
 /**
  * Axes Helper
@@ -78,9 +80,15 @@ const planeMaterial = new THREE.MeshBasicMaterial({
 const plane = new THREE.Mesh(planeGeometry, planeMaterial);
 scene.add(plane);
 
+// Cannon.js World
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, 0, 0) });
+world.broadphase = new CANNON.NaiveBroadphase();
+world.solver.iterations = 10;
+
 // Object
-let selectedUnits = [];
 let allUnits = [];
+const unitBodies = [];
+let selectedUnits = [];
 const unitSpeed = 4; // 2 units per second
 const geometry = new THREE.BoxGeometry(1, 1, 1);
 for (let i = 0; i < 20; i++) {
@@ -104,15 +112,25 @@ for (let i = 0; i < 20; i++) {
   mesh.userData.targetPosition = null;
   scene.add(mesh);
   allUnits.push(mesh);
+
+  // Create Cannon body
+  const shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5));
+  const body = new CANNON.Body({
+    mass: 1,
+    shape,
+    position: new CANNON.Vec3(position.x, position.y, 0),
+  });
+
+  body.linearDamping = 0.995; // 선속도 감쇠 (0~1 사이, 0이면 감쇠 없음)
+  body.angularDamping = 1.0; // 회전 감쇠 (회전 안 하면 1로 설정)
+  world.addBody(body);
+  unitBodies.push(body);
 }
 
 function isOverlapping(newPos, existingUnits, minDistance = 1.5) {
-  for (let unit of existingUnits) {
-    if (unit.position.distanceTo(newPos) < minDistance) {
-      return true;
-    }
-  }
-  return false;
+  return existingUnits.some(
+    (unit) => unit.position.distanceTo(newPos) < minDistance
+  );
 }
 
 /**
@@ -317,23 +335,37 @@ document.addEventListener("pointerup", function (event) {
     const intersects = raycaster.intersectObject(plane);
     if (intersects.length > 0) {
       const targetPoint = intersects[0].point;
-
       const spacing = 1.5; // 유닛 간 거리
       const unitsPerRow = Math.ceil(Math.sqrt(selectedUnits.length));
 
-      selectedUnits.forEach((unit, i) => {
+      // 1. 타겟 포인트 배열 생성
+      const targetPositions = [];
+      for (let i = 0; i < selectedUnits.length; i++) {
         const row = Math.floor(i / unitsPerRow);
         const col = i % unitsPerRow;
-
-        // 중심 기준으로 좌우/상하로 퍼지게 오프셋 계산
         const offsetX = (col - (unitsPerRow - 1) / 2) * spacing;
         const offsetY = ((unitsPerRow - 1) / 2 - row) * spacing;
-
-        const unitTarget = targetPoint
+        const pos = targetPoint
           .clone()
           .add(new THREE.Vector3(offsetX, offsetY, 1));
-        unit.userData.targetPosition = unitTarget;
-      });
+        targetPositions.push(pos);
+      }
+
+      // 2. 거리 기반 비용 행렬 생성
+      const costMatrix = selectedUnits.map((unit) =>
+        targetPositions.map((target) => unit.position.distanceTo(target))
+      );
+
+      // 3. 최적 매칭 구하기
+      const munkres = new Munkres(); // 헝가리안 알고리즘 인스턴스
+      const matches = munkres.compute(costMatrix); // 결과: [[unitIdx, targetIdx], ...]
+
+      // 4. 매칭에 따라 타겟 지정
+      for (const [unitIdx, targetIdx] of matches) {
+        const unit = selectedUnits[unitIdx];
+        unit.userData.targetPosition = targetPositions[targetIdx];
+      }
+
       showMoveMarker(targetPoint);
     }
     return;
@@ -379,77 +411,59 @@ document.addEventListener("contextmenu", (event) => event.preventDefault());
 const clock = new THREE.Clock();
 
 const tick = () => {
-  const deltaTime = clock.getDelta(); // 프레임 간 시간 차이
-  const elapsedTime = clock.getElapsedTime();
+  const deltaTime = clock.getDelta();
+  world.step(1 / 60, deltaTime);
 
-  // Update controls
-  // controls.update();
+  unitBodies.forEach((body, i) => {
+    const unit = allUnits[i];
+    const target = unit.userData.targetPosition;
+
+    if (target) {
+      const dir = new CANNON.Vec3(
+        target.x - body.position.x,
+        target.y - body.position.y,
+        0
+      );
+      const dist = dir.length();
+
+      if (dist > 0.1) {
+        dir.normalize();
+        const speed = 5;
+        body.velocity.set(dir.x * speed, dir.y * speed, 0);
+      } else {
+        body.velocity.set(0, 0, 0);
+        unit.userData.targetPosition = null;
+      }
+      // ✅ 회전 (z축 기준)
+      const angle = Math.atan2(dir.y, dir.x);
+      const currentAngle = unit.rotation.z;
+
+      // 보간 회전: 부드럽게 돌기
+      const rotationSpeed = 5; // 라디안/초
+      let deltaAngle = angle - currentAngle;
+
+      // 최소 회전 방향 보정
+      deltaAngle = ((deltaAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+
+      unit.rotation.z += deltaAngle * Math.min(rotationSpeed * deltaTime, 1);
+      body.quaternion.setFromEuler(0, 0, unit.rotation.z);
+    }
+
+    // Three.js mesh에 Cannon 바디 위치 반영
+    unit.position.set(body.position.x, body.position.y, unit.position.z);
+  });
+
+  // 선택 마커 동기화
   allUnits.forEach((unit) => {
-    // 선택되지 않았는데 마커가 있다면 제거
     if (!selectedUnits.includes(unit) && unit.userData.selectionMarker) {
       removeSelectionMarker(unit);
     }
-    const target = unit.userData.targetPosition;
-    if (target) {
-      const direction = new THREE.Vector3().subVectors(target, unit.position);
-      const distance = direction.length();
-
-      if (distance > 0.05) {
-        direction.normalize(); // 방향 벡터 만들기
-        const moveDistance = unitSpeed * deltaTime; // 이번 프레임에 이동할 거리
-
-        // ✅ 이동
-        if (moveDistance < distance) {
-          unit.position.addScaledVector(direction, moveDistance);
-          // ✅ 이동 중 충돌 회피
-          for (let j = 0; j < allUnits.length; j++) {
-            const other = allUnits[j];
-            if (other !== unit) {
-              const diff = new THREE.Vector3().subVectors(
-                unit.position,
-                other.position
-              );
-
-              // ✅ Z축 무시
-              diff.z = 0;
-
-              const dist = diff.length();
-              if (dist < 3 && dist > 0) {
-                const repulsion = diff
-                  .normalize()
-                  .multiplyScalar(0.5 * deltaTime);
-                unit.position.add(repulsion);
-              }
-            }
-          }
-        } else {
-          unit.position.copy(target); // 목표 지점 도착
-          unit.userData.targetPosition = null;
-        }
-
-        // ✅ 회전 (z축 기준)
-        const angle = Math.atan2(direction.y, direction.x);
-        const currentAngle = unit.rotation.z;
-
-        // 보간 회전: 부드럽게 돌기
-        const rotationSpeed = 5; // 라디안/초
-        let deltaAngle = angle - currentAngle;
-
-        // 최소 회전 방향 보정
-        deltaAngle = ((deltaAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
-
-        unit.rotation.z += deltaAngle * Math.min(rotationSpeed * deltaTime, 1);
-      } else {
-        unit.position.copy(target);
-        unit.userData.targetPosition = null;
-      }
-    }
   });
-  // Render
+
   renderer.render(scene, camera);
   stats.update();
-  // Call tick again on the next frame
-  window.requestAnimationFrame(tick);
+  controls.update();
+  requestAnimationFrame(tick);
 };
 
 tick();
