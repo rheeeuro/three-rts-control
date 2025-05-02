@@ -93,6 +93,7 @@ const gltfLoader = new GLTFLoader();
 gltfLoader.load("/Models/Duck/glTF/Duck.gltf", (gltf) => {
   const baseUnit = gltf.scene; // 또는 gltf.scene 전체
   baseUnit.rotation.set(Math.PI / 2, 0, 0);
+  baseUnit.position.set(0, 0, -1.1);
   spawnUnits(baseUnit); // 유닛 생성 함수 호출
 });
 
@@ -175,8 +176,8 @@ const helper = new SelectionHelper(renderer, "selectBox");
  * Select Marker
  */
 function createSelectionMarker(unit) {
-  const innerRadius = 0.7;
-  const outerRadius = 0.75;
+  const innerRadius = 0.75;
+  const outerRadius = 0.8;
   const segments = 32;
 
   const geometry = new THREE.RingGeometry(innerRadius, outerRadius, segments);
@@ -189,7 +190,7 @@ function createSelectionMarker(unit) {
   });
 
   const ring = new THREE.Mesh(geometry, material);
-  ring.position.set(0, 0, -0.51); // 유닛 밑으로 살짝
+  ring.position.set(0, 0, -0.9); // 유닛 밑으로 살짝
 
   unit.add(ring);
   unit.userData.selectionMarker = ring;
@@ -208,6 +209,7 @@ function removeSelectionMarker(unit) {
 }
 
 function updateSelectionMarkers(newSelected) {
+  console.log(newSelected, selectedUnits);
   const newSet = new Set(newSelected);
   const oldSet = new Set(selectedUnits);
 
@@ -313,19 +315,15 @@ document.addEventListener("pointerdown", function (event) {
   const selectableUnits = scene.children.filter((obj) => obj.name === "unit");
   const intersects = raycaster.intersectObjects(selectableUnits);
 
-  for (const item of selectableUnits) {
-    removeSelectionMarker(item); // 마커 제거
-  }
-
-  selectedUnits = [];
   // 첫 번째 교차된 유닛만 선택
   if (intersects.length > 0) {
     let selected = intersects[0].object;
     while (selected.parent && selected.parent !== scene) {
       selected = selected.parent;
     }
-    createSelectionMarker(selected); // 마커 추가
-    selectedUnits.push(selected);
+    updateSelectionMarkers([selected]);
+  } else {
+    updateSelectionMarkers([]);
   }
 });
 
@@ -350,22 +348,16 @@ document.addEventListener("pointermove", function (event) {
 
   const allSelected = selectionBox.select();
   const units = new Set();
-  if (allSelected.length > 0) {
-    selectedUnits = [];
-
-    for (let i = 0; i < allSelected.length; i++) {
-      let unit = allSelected[i];
-      while (unit.parent && unit.parent !== scene) {
-        unit = unit.parent;
-      }
-      if (unit.name === "unit") {
-        units.add(unit);
-        createSelectionMarker(unit); // 마커 추가
-        selectedUnits.push(unit);
-      }
+  for (let selected of allSelected) {
+    let unit = selected;
+    while (unit.parent && unit.parent !== scene) {
+      unit = unit.parent;
     }
-    updateSelectionMarkers([...units]);
+    if (unit.name === "unit") {
+      units.add(unit);
+    }
   }
+  updateSelectionMarkers([...units]);
 });
 
 document.addEventListener("pointerup", function (event) {
@@ -431,21 +423,17 @@ document.addEventListener("pointerup", function (event) {
   );
 
   const allSelected = selectionBox.select();
-  selectedUnits = [];
-  for (let i = 0; i < allSelected.length; i++) {
-    selectedUnits = [];
-
-    for (let i = 0; i < allSelected.length; i++) {
-      let unit = allSelected[i];
-      while (unit.parent && unit.parent !== scene) {
-        unit = unit.parent;
-      }
-      if (unit.name === "unit") {
-        createSelectionMarker(unit); // 마커 추가
-        selectedUnits.push(unit);
-      }
+  const units = new Set();
+  for (let selected of allSelected) {
+    let unit = selected;
+    while (unit.parent && unit.parent !== scene) {
+      unit = unit.parent;
+    }
+    if (unit.name === "unit") {
+      units.add(unit);
     }
   }
+  updateSelectionMarkers([...units]);
 
   // ✅ 드래그 후 selectionBox 및 helper 상태 초기화
   helper.enabled = false;
