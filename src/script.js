@@ -6,6 +6,7 @@ import { Munkres } from "munkres-js";
 import { SelectionBox } from "three/addons/interactive/SelectionBox.js";
 import { SelectionHelper } from "three/addons/interactive/SelectionHelper.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 /**
  * Base
@@ -85,46 +86,62 @@ const world = new CANNON.World({ gravity: new CANNON.Vec3(0, 0, 0) });
 world.broadphase = new CANNON.NaiveBroadphase();
 world.solver.iterations = 10;
 
+/**
+ * Models
+ */
+const gltfLoader = new GLTFLoader();
+gltfLoader.load("/Models/Duck/glTF/Duck.gltf", (gltf) => {
+  const baseUnit = gltf.scene; // 또는 gltf.scene 전체
+  baseUnit.rotation.set(Math.PI / 2, 0, 0);
+  spawnUnits(baseUnit); // 유닛 생성 함수 호출
+});
+
 // Object
 let allUnits = [];
 const unitBodies = [];
 let selectedUnits = [];
 const unitSpeed = 4; // 2 units per second
-const geometry = new THREE.BoxGeometry(1, 1, 1);
-for (let i = 0; i < 20; i++) {
-  const material = new THREE.MeshLambertMaterial({ color: 0xff00ff });
-  const mesh = new THREE.Mesh(geometry, material);
-  let position;
-  let tries = 0;
+function spawnUnits(baseModel) {
+  for (let i = 0; i < 20; i++) {
+    const unit = new THREE.Object3D();
+    const model = baseModel.clone(true); // true: 메쉬와 머티리얼까지 깊은 복사
+    unit.add(model);
+    let position;
+    let tries = 0;
 
-  // 겹치지 않는 위치 찾기 (최대 100번 시도)
-  do {
-    position = new THREE.Vector3(
-      Math.random() * 20 - 10,
-      Math.random() * 20 - 10,
-      1
-    );
-    tries++;
-  } while (isOverlapping(position, allUnits) && tries < 100);
+    do {
+      position = new THREE.Vector3(
+        Math.random() * 20 - 10,
+        Math.random() * 20 - 10,
+        1
+      );
+      tries++;
+    } while (isOverlapping(position, allUnits) && tries < 100);
 
-  mesh.position.copy(position);
-  mesh.name = "unit";
-  mesh.userData.targetPosition = null;
-  scene.add(mesh);
-  allUnits.push(mesh);
+    if (tries >= 100) {
+      console.warn(`유닛 배치 실패: ${i}`);
+      continue;
+    }
+    unit.position.copy(position);
+    unit.name = "unit";
+    unit.userData.id = i + 1;
+    unit.userData.targetPosition = null;
+    scene.add(unit);
+    allUnits.push(unit);
 
-  // Create Cannon body
-  const shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5));
-  const body = new CANNON.Body({
-    mass: 1,
-    shape,
-    position: new CANNON.Vec3(position.x, position.y, 0),
-  });
+    // Cannon body 생성
+    const shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)); // 사이즈는 모델에 따라 조정
+    const body = new CANNON.Body({
+      mass: 1,
+      shape,
+      position: new CANNON.Vec3(position.x, position.y, 0),
+    });
 
-  body.linearDamping = 0.995; // 선속도 감쇠 (0~1 사이, 0이면 감쇠 없음)
-  body.angularDamping = 1.0; // 회전 감쇠 (회전 안 하면 1로 설정)
-  world.addBody(body);
-  unitBodies.push(body);
+    body.linearDamping = 0.995;
+    body.angularDamping = 1.0;
+    world.addBody(body);
+    unitBodies.push(body);
+  }
 }
 
 function isOverlapping(newPos, existingUnits, minDistance = 1.5) {
@@ -190,6 +207,23 @@ function removeSelectionMarker(unit) {
   }
 }
 
+function updateSelectionMarkers(newSelected) {
+  const newSet = new Set(newSelected);
+  const oldSet = new Set(selectedUnits);
+
+  // 제거
+  selectedUnits.forEach((unit) => {
+    if (!newSet.has(unit)) removeSelectionMarker(unit);
+  });
+
+  // 추가
+  newSelected.forEach((unit) => {
+    if (!oldSet.has(unit)) createSelectionMarker(unit);
+  });
+
+  selectedUnits = [...newSelected];
+}
+
 /**
  * Target Marker
  */
@@ -246,6 +280,7 @@ document.body.appendChild(stats.dom);
 /**
  * Events
  */
+let lastSelectionTime = 0;
 document.addEventListener("pointerdown", function (event) {
   if (event.button === 2) {
     helper.isDown = false;
@@ -279,15 +314,16 @@ document.addEventListener("pointerdown", function (event) {
   const intersects = raycaster.intersectObjects(selectableUnits);
 
   for (const item of selectableUnits) {
-    item.material.emissive?.set(0x000000);
     removeSelectionMarker(item); // 마커 제거
   }
 
   selectedUnits = [];
   // 첫 번째 교차된 유닛만 선택
   if (intersects.length > 0) {
-    const selected = intersects[0].object;
-    selected.material.emissive?.set(0xaaaaaa);
+    let selected = intersects[0].object;
+    while (selected.parent && selected.parent !== scene) {
+      selected = selected.parent;
+    }
     createSelectionMarker(selected); // 마커 추가
     selectedUnits.push(selected);
   }
@@ -296,9 +332,12 @@ document.addEventListener("pointerdown", function (event) {
 document.addEventListener("pointermove", function (event) {
   if (!helper.enabled || !helper.isDown || event.buttons !== 1) return;
 
+  const now = performance.now();
+  if (now - lastSelectionTime < 100) return;
+  lastSelectionTime = now;
+
   for (let i = 0; i < selectionBox.collection.length; i++) {
     if (selectionBox.collection[i].name === "unit") {
-      selectionBox.collection[i].material.emissive.set(0x000000);
       removeSelectionMarker(selectionBox.collection[i]); // 마커 제거
     }
   }
@@ -310,15 +349,22 @@ document.addEventListener("pointermove", function (event) {
   );
 
   const allSelected = selectionBox.select();
+  const units = new Set();
   if (allSelected.length > 0) {
     selectedUnits = [];
+
     for (let i = 0; i < allSelected.length; i++) {
-      if (allSelected[i].name === "unit") {
-        allSelected[i].material.emissive?.set(0xaaaaaa);
-        createSelectionMarker(allSelected[i]); // 마커 추가
-        selectedUnits.push(allSelected[i]);
+      let unit = allSelected[i];
+      while (unit.parent && unit.parent !== scene) {
+        unit = unit.parent;
+      }
+      if (unit.name === "unit") {
+        units.add(unit);
+        createSelectionMarker(unit); // 마커 추가
+        selectedUnits.push(unit);
       }
     }
+    updateSelectionMarkers([...units]);
   }
 });
 
@@ -374,7 +420,6 @@ document.addEventListener("pointerup", function (event) {
 
   for (let i = 0; i < selectionBox.collection.length; i++) {
     if (selectionBox.collection[i].name === "unit") {
-      selectionBox.collection[i].material.emissive.set(0x000000);
       removeSelectionMarker(selectionBox.collection[i]); // 마커 제거
     }
   }
@@ -388,10 +433,17 @@ document.addEventListener("pointerup", function (event) {
   const allSelected = selectionBox.select();
   selectedUnits = [];
   for (let i = 0; i < allSelected.length; i++) {
-    if (allSelected[i].name === "unit") {
-      allSelected[i].material.emissive?.set(0xaaaaaa);
-      createSelectionMarker(allSelected[i]); // 마커 추가
-      selectedUnits.push(allSelected[i]);
+    selectedUnits = [];
+
+    for (let i = 0; i < allSelected.length; i++) {
+      let unit = allSelected[i];
+      while (unit.parent && unit.parent !== scene) {
+        unit = unit.parent;
+      }
+      if (unit.name === "unit") {
+        createSelectionMarker(unit); // 마커 추가
+        selectedUnits.push(unit);
+      }
     }
   }
 
@@ -416,6 +468,7 @@ const tick = () => {
 
   unitBodies.forEach((body, i) => {
     const unit = allUnits[i];
+    if (!unit) return; // 💥 방어 코드
     const target = unit.userData.targetPosition;
 
     if (target) {
