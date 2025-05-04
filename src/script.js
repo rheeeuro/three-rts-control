@@ -504,6 +504,13 @@ const tick = () => {
   renderer.render(scene, camera);
   stats.update();
   controls.update();
+
+  const bottomUI = document.querySelector(".bottom-ui");
+  bottomUI.innerHTML = `
+  ${selectedUnits
+    .map((unit) => `<div class="unit-box">${unit.userData.id}</div>`)
+    .join("")}`;
+
   requestAnimationFrame(tick);
 };
 
