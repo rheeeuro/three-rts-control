@@ -209,21 +209,34 @@ function removeSelectionMarker(unit) {
 }
 
 function updateSelectionMarkers(newSelected) {
-  console.log(newSelected, selectedUnits);
+  if (keyStatus.shift) {
+    const remove =
+      newSelected.length === 1 &&
+      selectedUnits.find(
+        (unit) => unit.userData.id === newSelected[0].userData.id
+      );
+    if (remove) {
+      newSelected = selectedUnits.filter(
+        (unit) => unit.userData.id !== newSelected[0].userData.id
+      );
+    } else {
+      newSelected = [...selectedUnits, ...newSelected];
+    }
+  }
   const newSet = new Set(newSelected);
   const oldSet = new Set(selectedUnits);
 
   // 제거
-  selectedUnits.forEach((unit) => {
+  oldSet.forEach((unit) => {
     if (!newSet.has(unit)) removeSelectionMarker(unit);
   });
 
   // 추가
-  newSelected.forEach((unit) => {
+  newSet.forEach((unit) => {
     if (!oldSet.has(unit)) createSelectionMarker(unit);
   });
 
-  selectedUnits = [...newSelected];
+  selectedUnits = [...newSet];
 }
 
 /**
@@ -282,7 +295,26 @@ document.body.appendChild(stats.dom);
 /**
  * Events
  */
+const keyStatus = {
+  shift: false,
+  control: false,
+};
 let lastSelectionTime = 0;
+document.addEventListener("keydown", function (event) {
+  if (event.key === "Shift") {
+    keyStatus.shift = true;
+  } else if (event.key === "Control") {
+    keyStatus.control = true;
+  }
+});
+document.addEventListener("keyup", function (event) {
+  if (event.key === "Shift") {
+    keyStatus.shift = false;
+  } else if (event.key === "Control") {
+    keyStatus.control = false;
+  }
+});
+
 document.addEventListener("pointerdown", function (event) {
   if (event.button === 2) {
     helper.isDown = false;
